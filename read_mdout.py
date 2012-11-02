@@ -57,6 +57,16 @@ from __future__ import division, print_function
 import re, numpy
 
 class MDOutParser(object):
+    '''Parses energies and related terms from AMBER mdout files. To use:
+        parser = MDOutParser()
+        variables = parser.parse(open('mdout', 'rt'))
+    
+    The return value of ``parse()`` is a dictionary of Numpy arrays; if the run
+    completed successfully, then the last two entries (indices -2 and -1,
+    respectively) are the average value and RMS fluctuation over the run.
+    '''     
+    
+    
     # Split on any digit boundary, absorbing whitespace, but only if that digit is
     # not preceded by a '-' (i.e. is not the '4' in '1-4 NB').
     re_split_line = re.compile(r'(?<=(?<!-)\d)\s*')
@@ -75,6 +85,13 @@ class MDOutParser(object):
         self.type_overrides = type_overrides if type_overrides else dict(self.__class__.type_overrides)
     
     def parse(self, mdout_file):
+        '''Parse ``mdout_file`` and return a dictionary of Numpy arrays. If the run completed
+        successfully, then the last two values in each array will be the average and RMS 
+        fluctuation (in that order). This can be confirmed by looking at the last three
+        NSTEP values; if they are equal, then the first of the three is the value at 
+        NSTEP, the second is the average, and the third is the RMS fluctuation.
+        '''
+
         type_overrides = self.type_overrides
         default_type = self.default_type
         block_start = self.block_start
@@ -119,7 +136,6 @@ class MDOutParser(object):
         # Trim output arrays to the appropriate length
         for name in variables:
             variables[name] = numpy.resize(variables[name], (nblocks,))
-
     
         return variables
     
@@ -128,7 +144,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='''\
 Parse AMBER mdout files into HDF5 files. Each quantity is stored in a data set
 identified by the label within the mdout file (e.g. "NSTEP", "EPtot", "Density", 
-and "EAMBER (non-restraint)"). In addition, average average values and RMS
+"TIME(PS), and "EAMBER (non-restraint)"). In addition, average average values and RMS
 fluctuations are stored as attributes on each data set.''')
     parser.add_argument('-o', '--output', default='mdout.h5',
                         help='''Store data in OUTPUT (default: %(default)s).''')
@@ -141,7 +157,13 @@ fluctuations are stored as attributes on each data set.''')
     input_file = open(args.input, 'rt')
     parser = MDOutParser()
     variables = parser.parse(input_file)
+    
+    nstep = variables['NSTEP']
+    has_avg_and_fluct = (nstep[-3] == nstep[-2] == nstep[-1]) 
+    
     for name, array in variables.iteritems():
         output_ds = output_h5.create_dataset(name, data=array[:-2])
-        output_ds.attrs['average'] = array[-2]
-        output_ds.attrs['rmsfluct'] = array[-1]
+        
+        if has_avg_and_fluct:
+            output_ds.attrs['average'] = array[-2]
+            output_ds.attrs['rmsfluct'] = array[-1]
